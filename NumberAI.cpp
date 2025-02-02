@@ -6,12 +6,11 @@
 using namespace std;
 #define e 2.718281828
 const int number=300;
-const int train_time=1250;
-const int Smaller=20;
+const int train_time=250;
 //        num cnt pixel
 float ima[30][6000][784];
 float learn_rate=0.01;
-const int n=20;
+const int n=40;
 #include"headfile/Dataloader.hpp"
 inline float sigmoid(float x){
 	return 1/(1+pow(e,-x));
@@ -21,6 +20,9 @@ inline float sigmoid_derivative(float x){
 }
 inline float mse_loss(float predicted, float actual) {
     return 0.5 * (predicted - actual) * (predicted - actual);
+}
+inline float cross_entropy_loss(float predicted, float actual) {
+    return -actual * log(predicted + 1e-9); // 加上一个小常数防止 log(0)
 }
 class NODE{
 	public:
@@ -93,118 +95,127 @@ public:
             Output[i].run();
         }
     }
-    float train(){
-    	float loss_sum=0;
-        for (int num = 0; num < 10; num++) {
-            for (int id = 1; id <= number; id++) {
-                run(num, id);  // 运行网络
-                for (int i = 0; i < 10; i++) {
-                    register float predicted = Output[i].get_value();
-                    register float actual = i == num ? 1 : 0;
-                    register float loss = mse_loss(predicted, actual);
-                    loss_sum+=loss;
-                    // 反向传播      输出层
-                    register float output_grad = predicted - actual;
-                    for (int j = 0; j < n; j++) {
-                        Output[i].w[j] -= learn_rate * output_grad * Hidden[1][j].get_value();
-                    }
-                    Output[i].b -= learn_rate * output_grad;
-                    
-                    // 反向传播 第二个隐藏层
-                    register float hidden2_grad = 0;
-                    for (int j = 0; j < 10; j++) {
-                        hidden2_grad += Output[j].w[i] * (Output[j].get_value() - (j == num ? 1 : 0));
-                    }
-                    hidden2_grad *= sigmoid_derivative(Hidden[1][i].get_value()); // sigmoid函数导数
-                    for (int j = 0; j < n; j++) {
-                        Hidden[1][i].w[j] -= learn_rate * hidden2_grad * Hidden[0][j].get_value();
-                    }
-                    Hidden[1][i].b -= learn_rate * hidden2_grad;
-                    
-                    // 反向传播 第一个隐藏层
-                    register float hidden1_grad = 0;
-                    for (int j = 0; j < n; j++) {
-                        hidden1_grad += Hidden[1][j].w[i] * hidden2_grad;
-                    }
-                    hidden1_grad *= sigmoid_derivative(Hidden[0][i].get_value()); // sigmoid函数导数
-                    for (int j = 0; j < 784; j++) {
-                        Hidden[0][i].w[j] -= learn_rate * hidden1_grad * Input[j].get_value();
-                    }
-                    Hidden[0][i].b -= learn_rate * hidden1_grad;
-                }
-            }
-        }
-        return loss_sum;
-    }
+    float train() {
+	    float loss_sum = 0;
+	    for (int num = 0; num < 10; num++) {
+	        for (int id = 1; id <= number; id++) {
+	            run(num, id);  // 前向传播
+	
+	            // 计算交叉熵损失
+	            float output_grad[10] = {0};
+	            for (int i = 0; i < 10; i++) {
+	                float predicted = Output[i].get_value();
+	                float actual = (i == num) ? 1 : 0;
+	                loss_sum += cross_entropy_loss(predicted, actual);
+	                output_grad[i] = predicted - actual;  // 交叉熵损失的梯度
+	            }
+	
+	            // 反向传播更新权重
+	            for (int i = 0; i < 10; i++) {
+	                for (int j = 0; j < n; j++) {
+	                    Output[i].w[j] -= learn_rate * output_grad[i] * Hidden[1][j].get_value();
+	                }
+	                Output[i].b -= learn_rate * output_grad[i];
+	            }
+	
+	            // 隐藏层2的梯度计算
+	            float hidden2_grads[n] = {0};
+	            for (int h2 = 0; h2 < n; h2++) {
+	                float grad = 0;
+	                for (int out = 0; out < 10; out++) {
+	                    grad += Output[out].w[h2] * output_grad[out];
+	                }
+	                grad *= sigmoid_derivative(Hidden[1][h2].get_value());
+	                hidden2_grads[h2] = grad;
+	
+	                // 更新隐藏层2的权重
+	                for (int j = 0; j < n; j++) {
+	                    Hidden[1][h2].w[j] -= learn_rate * grad * Hidden[0][j].get_value();
+	                }
+	                Hidden[1][h2].b -= learn_rate * grad;
+	            }
+	
+	            // 隐藏层1的梯度计算
+	            for (int h1 = 0; h1 < n; h1++) {
+	                float grad = 0;
+	                for (int h2 = 0; h2 < n; h2++) {
+	                    grad += Hidden[1][h2].w[h1] * hidden2_grads[h2];
+	                }
+	                grad *= sigmoid_derivative(Hidden[0][h1].get_value());
+	
+	                // 更新隐藏层1的权重
+	                for (int j = 0; j < 784; j++) {
+	                    Hidden[0][h1].w[j] -= learn_rate * grad * Input[j].get_value();
+	                }
+	                Hidden[0][h1].b -= learn_rate * grad;
+	            }
+	        }
+	    }
+	    return loss_sum;
+	}
 };
 AI ai;
 int main(){
-	initgraph(train_time,800);
+	initgraph(train_time,400);
 	load_data();
 	ai.init();
-	for(int n=1;n<=1;n++){
-		cout<<endl<<"------------训练中"<<n<<"------------" <<endl;
-		int last=800;
-		int last2=800;
-		for(int i=1;i<train_time;i++){
-			if(i==train_time/6) learn_rate/=Smaller;
-			if(i==train_time/6*2) learn_rate/=Smaller;
-			if(i==train_time/6*3) learn_rate/=Smaller;
-			if(i==train_time/6*4) learn_rate/=Smaller;
-			if(i==train_time/6*5) learn_rate/=Smaller;
-			int loss=ai.train();
-			setcolor(EGERGB(255,255,255));
-			/*if(loss>last){
-				setcolor(EGERGB(255,0,0));
-				xyprintf(i,800-loss,"%d",i);
-			}*/
-			line(i,800-loss,i-1,800-last);
-			last=loss;
-			
-			float loss2=0;
-			for(int i=10;i<20;i++){
-				for(int j=1;j<=10;j++){
-					ai.run(i,j);
-					for(int tmp=1;tmp<10;tmp++){
-						loss2+=mse_loss(tmp==i-10?1:0,ai.Output[tmp].get_value());
-					}
-				}
-			}
-			loss2*=18;
-			setcolor(EGERGB(0,255,0));
-			if(loss2>last2) setcolor(EGERGB(255,0,0));
-			line(i,800-loss2,i-1,800-last2);
-			last2=loss2;
-			printf("round:%d loss:%d val:%d         \r",i,loss,(int)loss2);
-			
-			//Sleep(1);
-		}
-		cout<<endl<<"------------训练结束------------" <<endl;
-		cout<<endl<<"------------结果------------" <<endl;
-		for(int i=0;i<10;i++){
-			cout<<"number"<<i<<endl;
-			cout<<"predict:";
-			for(int j=1;j<=number;j++){
+	cout<<endl<<"------------训练中"<<"------------" <<endl;
+	int last=800;
+	int last2=800;
+	for(int i=1;i<train_time;i++){
+		int loss=ai.train();
+		setcolor(EGERGB(255,255,255));
+		/*if(loss>last){
+			setcolor(EGERGB(255,0,0));
+			xyprintf(i,800-loss,"%d",i);
+		}*/
+		line(i,400-loss,i-1,400-last);
+		last=loss;
+		
+		float loss2=0;
+		for(int i=10;i<20;i++){
+			for(int j=1;j<=10;j++){
 				ai.run(i,j);
-				float maxx=ai.Output[0].get_value();
-				int res=0;
 				for(int tmp=1;tmp<10;tmp++){
-					//printf("%.3f ",ai.Output[tmp].get_value());
-					if(ai.Output[tmp].get_value()>maxx){
-						res=tmp;
-						maxx=ai.Output[tmp].get_value();
-					}
+					loss2+=mse_loss(tmp==i-10?1:0,ai.Output[tmp].get_value());
 				}
-				//cout<<endl;
-				cout<<res<<" ";
 			}
-			cout<<endl;
 		}
-		learn_rate/=2.0;
+		loss2*=18;
+		setcolor(EGERGB(0,255,0));
+		if(loss2>last2) setcolor(EGERGB(255,0,0));
+		line(i,400-loss2,i-1,400-last2);
+		last2=loss2;
+		printf("次数%d 训练集损失函数:%d 测试集损失函数:%d         \r",i,loss,(int)loss2);
 	}
+	cout<<endl<<"------------训练结束------------" <<endl;
+	cout<<endl<<"------------结果------------" <<endl;
+	int err_cnt1=0;
+	for(int i=0;i<10;i++){
+		cout<<"数字"<<i<<endl;
+		cout<<"预测结果";
+		for(int j=1;j<=number;j++){
+			ai.run(i,j);
+			float maxx=ai.Output[0].get_value();
+			int res=0;
+			for(int tmp=1;tmp<10;tmp++){
+				if(ai.Output[tmp].get_value()>maxx){
+					res=tmp;
+					maxx=ai.Output[tmp].get_value();
+				}
+			}
+			cout<<res<<" ";
+			if(res!=i){
+				err_cnt1++;
+			}
+		}
+		cout<<endl;
+	}
+	cout<<"训练集准确率："<<100.0*(10*number-err_cnt1)/(10*number)<<"%"<<endl;
+	int err_cnt2=0;
 	for(int i=10;i<20;i++){
-		cout<<"number"<<i-10<<endl;
-		cout<<"predict:";
+		cout<<"数字"<<i-10<<endl;
+		cout<<"预测结果";
 		for(int j=1;j<=10;j++){
 			ai.run(i,j);
 			float maxx=ai.Output[0].get_value();
@@ -218,8 +229,12 @@ int main(){
 			}
 			//cout<<endl;
 			cout<<res<<" ";
+			if(res!=i-10){
+				err_cnt2++;
+			}
 		}
 		cout<<endl;
 	}
+	cout<<"测试集准确率："<<100.0*(10*10-err_cnt2)/(10*10)<<"%";
 	getch();
 } 
